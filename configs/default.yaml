@@ -35,3 +35,20 @@ lighting:             # SUP-22
 runtime:
   device_priority: ["cuda", "mps", "cpu"]
   detection_confidence: 0.25   # SUP-18: detector permisivo
+
+weights:
+  yolo_seg: "weights/yolo11n-seg.pt"
+  yolo_world: "weights/yolov8s-worldv2.pt"
+
+# Metodo 2: prompts de texto para deteccion open-vocabulary.
+# Parametrizables sin recompilar: en produccion los prompts se ajustan
+# segun el parque de maquinaria de cada faena.
+open_vocabulary:
+  prompts:
+    caex:
+      - "mining haul truck"
+      - "large dump truck"
+    dozer:
+      - "bulldozer"
+      - "crawler tractor with blade"
+  confidence: 0.05

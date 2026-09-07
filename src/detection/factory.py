@@ -18,6 +18,7 @@ def build_detector(method: str, config: dict[str, Any]) -> VehicleDetector:
         return YoloSegDetector(config)
 
     if method == "2":
-        raise NotImplementedError("Metodo 2 pendiente de implementacion")
+        from src.detection.yolo_world import YoloWorldDetector
+        return YoloWorldDetector(config)
 
     raise ValueError(f"Metodo no reconocido: {method}")
