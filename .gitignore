@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+weights/
+data/
+output/
+*.mp4
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
