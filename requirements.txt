@@ -5,3 +5,4 @@ scikit-image==0.24.0
 matplotlib==3.9.2
 pyyaml==6.0.2
 scenedetect==0.6.4
+lap>=0.5.12

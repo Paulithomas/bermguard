@@ -2,7 +2,7 @@
 
 Estrategia: modelo preentrenado en COCO como linea base, con mapeo de clases
 COCO a la taxonomia del dominio (SUP-06). COCO no contiene una clase para
-bulldozer, limitacion que se documenta y que motiva el fine-tune posterior.
+bulldozer, limitacion documentada en SUP-29 que motiva el fine-tune posterior.
 
 Umbral de confianza bajo por diseno (SUP-18): el material generativo produce
 geometrias irregulares que penalizan a detectores estrictos. El rechazo de
@@ -32,12 +32,13 @@ COCO_TO_DOMAIN: dict[str, VehicleClass] = {
 
 
 class YoloSegDetector(VehicleDetector):
-    """Detector de instancias basado en YOLOv11-seg."""
+    """Detector de instancias basado en YOLOv11-seg con seguimiento ByteTrack."""
 
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = config
         self._model: Any = None
         self._device: str = "cpu"
+        self._tracking: bool = True
         runtime = config.get("runtime", {})
         self._confidence: float = runtime.get("detection_confidence", 0.25)
         self._weights_path = Path(
@@ -45,7 +46,7 @@ class YoloSegDetector(VehicleDetector):
 
     @property
     def name(self) -> str:
-        return "yolo11n-seg (COCO)"
+        return "yolo11n-seg (COCO) + ByteTrack"
 
     def load(self) -> None:
         """Carga el modelo desde pesos locales.
@@ -67,13 +68,38 @@ class YoloSegDetector(VehicleDetector):
         self._model = YOLO(str(self._weights_path))
         logger.info("Modelo %s cargado en %s", self.name, self._device)
 
+    def reset_tracker(self) -> None:
+        """Reinicia el estado del tracker.
+
+        Obligatorio en cada corte de toma (SUP-19): mantener los IDs a traves
+        de un corte asocia vehiculos pertenecientes a escenas distintas.
+        """
+        if self._model is None:
+            return
+        predictor = getattr(self._model, "predictor", None)
+        trackers = getattr(predictor, "trackers", None) if predictor else None
+        if trackers:
+            for tracker in trackers:
+                tracker.reset()
+            logger.debug("Tracker reinicializado")
+
+    def set_tracking(self, enabled: bool) -> None:
+        """Activa o desactiva el seguimiento entre frames."""
+        self._tracking = enabled
+
     def detect(self, frame: np.ndarray, frame_index: int) -> FrameResult:
         if self._model is None:
             raise RuntimeError("load() debe invocarse antes de detect()")
 
         start = time.perf_counter()
-        results = self._model.predict(
-            frame, conf=self._confidence, device=self._device, verbose=False)
+        if self._tracking:
+            results = self._model.track(
+                frame, conf=self._confidence, device=self._device,
+                persist=True, tracker="bytetrack.yaml", verbose=False)
+        else:
+            results = self._model.predict(
+                frame, conf=self._confidence, device=self._device,
+                verbose=False)
         elapsed_ms = (time.perf_counter() - start) * 1000.0
 
         detections: list[Detection] = []
@@ -104,12 +130,17 @@ class YoloSegDetector(VehicleDetector):
             if masks is not None and i < len(masks.data):
                 mask = masks.data[i].cpu().numpy().astype(np.uint8)
 
+            track_id = None
+            if getattr(boxes, "id", None) is not None:
+                track_id = int(boxes.id[i])
+
             x1, y1, x2, y2 = (float(v) for v in boxes.xyxy[i])
             detections.append(Detection(
                 vehicle_class=vehicle_class,
                 confidence=float(boxes.conf[i]),
                 bbox=(x1, y1, x2, y2),
                 mask=mask,
+                track_id=track_id,
             ))
 
         return detections

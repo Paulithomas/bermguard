@@ -9,6 +9,7 @@ ENV PYTHONUNBUFFERED=1 \
     TORCH_HOME=/app/weights/torch \
     HF_HOME=/app/weights/hf \
     YOLO_CONFIG_DIR=/app/weights/yolo \
+    YOLO_AUTOINSTALL=false \
     MPLCONFIGDIR=/tmp/matplotlib
 
 # Dependencias de sistema para OpenCV headless
