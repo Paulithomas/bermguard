@@ -1,0 +1,36 @@
+# BermGuard AI - configuracion por defecto
+# Los IDs SUP-NN refieren a docs/SUPUESTOS.md v1.1
+
+proximity:            # SUP-04
+  warning_m: 20.0
+  critical_m: 10.0
+  color_safe: "#10B981"
+  color_warning: "#F59E0B"
+  color_critical: "#EF4444"
+
+reference:            # SUP-07
+  caex_height_m: 7.4
+  caex_width_m: 9.0
+  dozer_height_m: 4.5
+
+calibration:          # SUP-15
+  fallback_camera_height_m: 11.95
+  min_camera_height_m: 3.0
+  max_camera_height_m: 40.0
+
+berm:                 # SUP-01
+  max_height_m: 6.0
+  min_horizontal_coverage: 0.20
+
+shots:                # SUP-09
+  adaptive_threshold: 1.5
+  orb_drop_factor: 0.10
+  min_gap_frames: 15
+
+lighting:             # SUP-22
+  night_max_brightness: 60.0
+  twilight_max_brightness: 110.0
+
+runtime:
+  device_priority: ["cuda", "mps", "cpu"]
+  detection_confidence: 0.25   # SUP-18: detector permisivo
