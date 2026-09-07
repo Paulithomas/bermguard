@@ -1,9 +1,4 @@
-"""Recon 04 — Detección de cortes por discontinuidad estructural (ORB).
-
-Complementa a los detectores de PySceneDetect, que saturan en 12 de 16 cortes
-sobre este material: fallan cuando dos tomas consecutivas comparten condición
-lumínica y paleta. ORB mide continuidad estructural, no diferencia de contenido.
-"""
+"""Recon 04 - Deteccion de cortes por discontinuidad estructural (ORB)."""
 
 from __future__ import annotations
 
@@ -16,10 +11,7 @@ import numpy as np
 
 
 def match_ratio_series(video_path: Path, n_features: int = 500) -> list[float]:
-    """Serie temporal de la tasa de coincidencia ORB entre frames consecutivos.
-
-    Un valor bajo indica discontinuidad estructural, es decir, un corte.
-    """
+    """Serie temporal de la tasa de coincidencia ORB entre frames consecutivos."""
     cap = cv2.VideoCapture(str(video_path))
     orb = cv2.ORB_create(nfeatures=n_features)
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
@@ -49,7 +41,7 @@ def match_ratio_series(video_path: Path, n_features: int = 500) -> list[float]:
 
 def find_cuts(ratios: list[float], drop_factor: float = 0.45,
               min_gap: int = 15) -> list[int]:
-    """Detecta caídas abruptas de la tasa de coincidencia."""
+    """Detecta caidas abruptas de la tasa de coincidencia."""
     arr = np.array(ratios)
     median = float(np.median(arr))
     candidates = np.where(arr < median * drop_factor)[0]
@@ -61,8 +53,20 @@ def find_cuts(ratios: list[float], drop_factor: float = 0.45,
     return cuts
 
 
+def print_diagnostics(name: str, ratios: list[float], fps: float) -> None:
+    """Estadisticos de la serie para calibrar el umbral."""
+    arr = np.array(ratios)
+    print(f"\n{name}")
+    print(f"  mediana={np.median(arr):.3f}  min={arr.min():.3f}  "
+          f"p5={np.percentile(arr, 5):.3f}  p10={np.percentile(arr, 10):.3f}")
+    lowest = np.argsort(arr)[:6]
+    detail = ", ".join(f"f{i}({i / fps:.1f}s)={arr[i]:.3f}"
+                       for i in sorted(lowest))
+    print(f"  6 valores mas bajos: {detail}")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Detección de cortes por ORB")
+    parser = argparse.ArgumentParser(description="Deteccion de cortes por ORB")
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--drop", type=float, default=0.45)
@@ -77,11 +81,13 @@ def main() -> None:
         cap.release()
 
         ratios = match_ratio_series(video_path)
+        print_diagnostics(video_path.name, ratios, fps)
+
         cuts = find_cuts(ratios, args.drop)
         results[video_path.name] = cuts
 
         times = ", ".join(f"f{c} ({c / fps:.1f}s)" for c in cuts)
-        print(f"{video_path.name}: {len(cuts)} cortes -> {times or 'ninguno'}")
+        print(f"  cortes detectados: {len(cuts)} -> {times or 'ninguno'}")
 
     with open(args.output / "orb_cuts.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
