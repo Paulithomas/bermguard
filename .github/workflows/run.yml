@@ -1,0 +1,29 @@
+name: Run pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t bermguard .
+
+      - name: Run pipeline
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -v "${{ github.workspace }}/data/videos:/app/test" \
+            -v "${{ github.workspace }}/output:/app/output" \
+            bermguard
+          sudo chmod -R a+rX output
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: output
+          path: output/
