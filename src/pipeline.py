@@ -35,7 +35,7 @@ def load_config(path: Path) -> dict[str, Any]:
 
 
 def sample_for_calibration(video_path: Path, detector: Any,
-                           n_samples: int) -> tuple[list[list[Detection]], int]:
+                        n_samples: int) -> tuple[list[list[Detection]], int]:
     """Muestrea frames equiespaciados para estimar la calibracion de la toma."""
     cap = cv2.VideoCapture(str(video_path))
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -84,7 +84,7 @@ def berm_height_m(profile: Any, calibration: Calibration) -> float | None:
 
 
 def process_video(video_path: Path, output_dir: Path, method: str,
-                  config: dict[str, Any]) -> dict[str, Any]:
+                config: dict[str, Any]) -> dict[str, Any]:
     """Procesa un video y escribe sus artefactos.
 
     Raises:
@@ -158,10 +158,15 @@ def process_video(video_path: Path, output_dir: Path, method: str,
     cap.release()
     writer.release()
 
-    from src.analytics.plots import plot_berm_height, plot_vehicle_map
+    from src.analytics.plots import (plot_berm_height, plot_vehicle_map,
+                                    min_distance_summary)
     plot_berm_height(heights, fps, output_dir / "berm_height.png", calibration)
+    prox_cfg = config.get("proximity", {})
     plot_vehicle_map(positions, (width, height),
-                     output_dir / "vehicle_distribution.png")
+                    output_dir / "vehicle_distribution.png",
+                    calibration,
+                    prox_cfg.get("critical_m", 10.0),
+                    prox_cfg.get("warning_m", 20.0))
 
     valid_h = [h for h in heights if h is not None]
     metadata = {
@@ -176,6 +181,7 @@ def process_video(video_path: Path, output_dir: Path, method: str,
         "avg_ms_per_frame": round(float(np.mean(frame_times)), 2) if frame_times else None,
         "p95_ms_per_frame": round(float(np.percentile(frame_times, 95)), 2) if frame_times else None,
         "proximity_alerts": alerts_total,
+        **min_distance_summary(positions, calibration),
         "berm_detected": bool(valid_h),
         "berm_height_median_m": round(float(np.median(valid_h)), 2) if valid_h else None,
         "berm_height_p10_m": round(float(np.percentile(valid_h, 10)), 2) if valid_h else None,
@@ -188,7 +194,7 @@ def process_video(video_path: Path, output_dir: Path, method: str,
             "camera_height_m": (round(calibration.camera_height_m, 2)
                                 if calibration.is_metric else None),
             "dispersion_pct": (round(calibration.dispersion_pct, 1)
-                               if not np.isnan(calibration.dispersion_pct) else None),
+                            if not np.isnan(calibration.dispersion_pct) else None),
         },
     }
 
@@ -199,7 +205,7 @@ def process_video(video_path: Path, output_dir: Path, method: str,
 
 
 def run_pipeline(input_dir: Path, output_dir: Path,
-                 method: str, config_path: Path) -> int:
+                method: str, config_path: Path) -> int:
     """Procesa todos los videos de la carpeta de entrada."""
     from src.utils.device import resolve_device
 

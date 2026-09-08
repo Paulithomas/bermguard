@@ -64,10 +64,28 @@ Las más relevantes:
 
 **Escala métrica sin calibración de cámara (SUP-15).** No hay parámetros
 intrínsecos disponibles. La escala se resuelve por metrología de vista única
-usando la maquinaria como referencia de altura conocida, mediante una cascada
-de tres niveles que declara siempre su origen en `metadata.json`. Validado
-contra marcado manual: error de 1.4% en la estimación del horizonte y 5.4% en
-la altura de cámara.
+usando la maquinaria como referencia de altura conocida (7.4 m, CAEX clase
+300 t, SUP-07), mediante una cascada de tres niveles que declara siempre su
+origen y su confianza en `metadata.json`.
+
+Sin ground truth físico (SUP-11), la validación disponible es de consistencia,
+no de exactitud. Dos evidencias la sustentan:
+
+*Dispersión intra-video.* La estimación de escala se repite sobre múltiples
+frames y se reporta su dispersión: 5.9% en video_02, 6.9% en video_01 y 11.8%
+en video_03. En video_04 la cascada no encontró referencia vehicular suficiente
+y degradó al nivel 2 (`assumed_camera_height`, confianza 0.40), declarándolo
+explícitamente en lugar de emitir un número sin respaldo.
+
+*Convergencia entre métodos.* Tres de los cuatro videos arrojan alturas de
+pretil que difieren en menos de 6% entre el método 1 y el método 2, que usan
+detectores independientes. La convergencia de dos estimadores distintos sobre
+el mismo material es la evidencia más fuerte disponible en ausencia de verdad
+física.
+
+*Horizonte.* La estimación automática de video_01 (y = 478.9) coincide dentro
+del 2% con el marcado manual por intersección de bases y cimas de dos
+vehículos (y = 489 ± 4), documentado en `docs/EXPERIMENTOS.md` §2.
 
 **El material es sintético y carece de ground truth (SUP-11).** No existe
 verdad física contra la cual validar. El objetivo declarado es trazabilidad y
@@ -89,9 +107,14 @@ consistencia física de la altura implicada (ambigüedad geométrica genuina de 
 vista monocular). Se conserva la clase única en la línea base.
 
 **Selección de la cresta del pretil (SUP-01).** El extractor detecta
-estructuras horizontales de forma estable, pero el perfil de energía presenta
-varios picos bien formados —talud de fondo, cresta, ripio de primer plano— y el
-criterio de máxima energía no siempre selecciona el pretil correcto.
+estructuras horizontales de forma estable, pero el criterio de máxima energía
+no siempre selecciona el pretil correcto. El modo de fallo es identificable en
+las curvas de `berm_height.png`: no se manifiesta como ruido, sino como
+mesetas discretas y sostenidas —la mediana móvil salta a un nivel ~2.2 veces
+superior y permanece ahí mientras esa estructura domina el perfil de energía.
+Afecta a video_01 y video_02; video_03 y video_04 presentan curvas continuas
+sin mesetas. La condición que lo dispara es, presumiblemente, un talud de
+fondo visible en el encuadre.
 
 **Recall nocturno (SUP-30).** El método 1 cae de 0.88 a 0.39 detecciones por
 frame en escenas nocturnas con faros directos. Se verificó visualmente la
