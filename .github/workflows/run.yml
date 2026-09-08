@@ -19,7 +19,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}/data/videos:/app/test" \
             -v "${{ github.workspace }}/output:/app/output" \
-            bermguard
+            bermguard --input /app/test --output /app/output --method all
           sudo chmod -R a+rX output
 
       - name: Upload results
