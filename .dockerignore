@@ -2,9 +2,9 @@
 .git/
 data/
 docs/
-tools/
 __pycache__/
 *.pyc
 .DS_Store
 .mypy_cache/
 .ruff_cache/
+weights/

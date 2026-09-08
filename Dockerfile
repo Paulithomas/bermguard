@@ -12,10 +12,13 @@ ENV PYTHONUNBUFFERED=1 \
     YOLO_AUTOINSTALL=false \
     MPLCONFIGDIR=/tmp/matplotlib
 
-# Dependencias de sistema para OpenCV headless
+# Dependencias de sistema: libglib y libgl para OpenCV headless, git para
+# instalar el paquete clip de OpenAI, que no esta publicado en PyPI y es
+# requerido por el encoder de texto de YOLO-World.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 \
         libgl1 \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -24,12 +27,17 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /app/weights /app/test /app/output
+RUN mkdir -p /app/test /app/output
+
+# Descarga de pesos en build-time (SUP-24). Incluye el encoder CLIP que
+# YOLO-World resuelve al fijar el vocabulario: sin este paso el metodo 2
+# intentaria descargarlo en runtime y fallaria en un contenedor sin red.
+COPY configs/ ./configs/
+COPY tools/prepare_weights.py ./tools/
+RUN python tools/prepare_weights.py
 
 COPY main.py .
-COPY configs/ ./configs/
 COPY src/ ./src/
-
 COPY docker-entrypoint.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh
 
