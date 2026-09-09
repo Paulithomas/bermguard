@@ -110,6 +110,14 @@ patológicos en cualquiera de los dos.
 relativa sí es trasladable, al haberse medido en las mismas condiciones y en la
 misma ejecución.
 
+**Variabilidad entre ejecuciones.** Dos ejecuciones del mismo commit sobre
+runners de CI arrojaron FPS distintos (video_01/M1: 6.28 y 4.15; video_01/M2:
+4.34 y 2.55), por carga variable de CPU compartida. **Los valores absolutos de
+latencia no son reproducibles en este entorno; la razón entre métodos sí**
+(1.45 y 1.63). Todas las demás métricas —altura, percentiles, dispersión,
+alertas, cobertura, distancia mínima, horizonte— son idénticas entre ambas
+ejecuciones: el pipeline es determinista salvo en la medición de tiempo.
+
 ---
 
 ### 3.3 Comportamiento sobre los cuatro videos

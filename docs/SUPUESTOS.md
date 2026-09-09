@@ -465,6 +465,13 @@ output/
 
 > **Nota.** El resumen comparativo `comparison.json` a nivel de video no está implementado. La comparación se realiza manualmente sobre ambos `metadata.json` en el reporte de benchmark.
 
+**Corrección detectada por verificación de tipos.** `set_tracking` y
+`reset_tracker` eran invocados por el pipeline sin estar declarados en
+`VehicleDetector`. Un detector nuevo que implementara la interfaz completa
+habría fallado en runtime. Se incorporaron a la clase base como métodos
+concretos con implementación vacía, no abstractos: un detector sin estado
+temporal satisface el contrato sin escribir código innecesario.
+
 ---
 
 ### SUP-28 — Heterogeneidad de resolución y framerate
@@ -485,7 +492,7 @@ COCO no contiene clase para maquinaria de oruga: CAEX y bulldozer se detectan am
 
 1. **Relación de aspecto.** Insuficiente: un CAEX de perfil completo alcanza ratio 1.98, indistinguible del 1.94 de un dozer.
 2. **Consistencia física de la altura implicada.** Insuficiente por **ambigüedad geométrica genuina** de la vista monocular: un vehículo más bajo y más cercano produce exactamente la misma señal que uno más alto y más lejano. Sobre video_03 f90, con horizonte medido en y = 395.8, ambos vehículos convergen a h_cámara ≈ 5.4 m bajo hipótesis CAEX, sin separación explotable. **No es un defecto de implementación.**
-3. **Prompts de texto explícitos (método 2).** Sobre video_03 f90, con un CAEX y un bulldozer en cuadro y `"bulldozer"` / `"crawler tractor with blade"` en el vocabulario, ambos se etiquetaron `caex`. El vocabulario está disponible pero el modelo no discrimina estas dos clases en este material.
+3. **Prompts de texto explícitos (método 2).** Sobre video_03 f90, con un CAEX y un bulldozer en cuadro y `"bulldozer"` / `"crawler tractor with blade"` en el vocabulario, ambos se etiquetaron `caex`. El vocabulario **sí produce la clase `dozer`**, pero de forma esporádica: en la corrida completa aparece con 1 a 2 frames de presencia en video_03 y video_04, frente a decenas de frames del mismo objeto etiquetado `caex`. **La clase existe en la salida pero no es estable sobre un mismo track**, de modo que no constituye una clasificación utilizable.
 
 **Decisión.** Se conserva la clasificación única `caex` en la línea base. **Ningún enfoque zero-shot resuelve la clasificación en este material**; requiere fine-tune sobre datos del dominio (SUP-12), que no se realizó.
 
@@ -537,6 +544,10 @@ La distancia métrica entre dos vehículos se calcula convirtiendo la distancia 
 **Justificación.** La escala px/m depende de la profundidad en una vista en perspectiva, por lo que no existe un factor único válido para un par de vehículos situados a distinta distancia. El punto medio es la aproximación de primer orden correcta cuando ambos están sobre el mismo plano de suelo, y evita el sesgo de elegir arbitrariamente la escala de uno de los dos.
 
 **Restricción de concurrencia.** Solo se comparan detecciones del mismo frame. Dos vehículos que ocuparon la misma posición en instantes distintos no estuvieron próximos. Los tracks sin ID estable se excluyen, ya que no pueden asociarse entre frames.
+
+**Limitación de cobertura.** La matriz solo compara tracks con ID estable, de modo que un video con muchas alertas puede no producir ningún par trazable. En video_02 el método 2 registra 71 alertas de proximidad y la matriz queda vacía: las alertas se calculan sobre todas las detecciones del frame, mientras que la matriz exige identidad persistente. Ambas cifras son correctas y miden cosas distintas. La cobertura de la matriz depende por tanto de la calidad del tracking, no solo de la geometría.
+
+**Uso como detector de fragmentación de tracks.** Un valor por debajo del ancho nominal del equipo (9 m para CAEX, SUP-07) es físicamente imposible entre dos vehículos distintos y delata que un mismo objeto recibió dos IDs. El método 1 lo produce en tres de los cuatro videos: 0.08 m en video_02 entre tracks de clases distintas, 1.49 m en video_01, y tres pares del mismo track bajo 3 m en video_04. La matriz, diseñada para reportar proximidad, resulta ser también una medición del problema de identidad descrito en el trabajo pendiente.
 
 **Limitación.** La aproximación se degrada cuando la separación en profundidad entre ambos vehículos es grande, porque la escala varía de forma no lineal con `y`.
 
