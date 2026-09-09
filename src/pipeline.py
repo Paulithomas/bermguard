@@ -131,11 +131,18 @@ def process_video(video_path: Path, output_dir: Path, method: str,
             break
 
         start = time.perf_counter()
-        result = detector.detect(frame, frame_index)
-        pairs = compute_proximity(result.detections, calibration.y_horizon,
-                                  calibration.camera_height_m, config)
-        profile = extract_crest(frame, result.detections, config)
-        h_m = berm_height_m(profile, calibration)
+        try:
+            result = detector.detect(frame, frame_index)
+            pairs = compute_proximity(result.detections, calibration.y_horizon,
+                                      calibration.camera_height_m, config)
+            profile = extract_crest(frame, result.detections, config)
+            h_m = berm_height_m(profile, calibration)
+        except Exception as exc:
+            logger.warning("Frame %d omitido: %s", frame_index, exc)
+            heights.append(None)
+            writer.write(frame)
+            frame_index += 1
+            continue
         frame_times.append((time.perf_counter() - start) * 1000.0)
 
         n_alerts = sum(1 for p in pairs if p.risk_level.value != "safe")

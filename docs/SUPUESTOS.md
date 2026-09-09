@@ -107,7 +107,11 @@ y se reporta por frame como **mediana con percentiles p10 y p90**, no como escal
 
 Parametrizables sin recompilar la imagen.
 
-**Justificación.** El PDF los menciona como ejemplo cualitativo; el brief HTML los fija numéricamente junto al hex exacto y al campo `proximity_alert`. Se adopta el brief por ser la fuente más específica.
+**Justificación.** El PDF los menciona como ejemplo cualitativo; el brief HTML los fija numéricamente junto al hex exacto. Se adopta el brief por ser la fuente más específica en cuanto a valores.
+
+**Formato de reporte de la alerta.** Las dos fuentes también difieren en cómo reportarla: el brief muestra un flag booleano `proximity_alert` por vehículo, mientras que el PDF pide en `metadata.json` el "conteo de alertas de proximidad". Se adopta el conteo agregado del PDF, materializado en el campo `proximity_alerts`, por ser el requisito de la fuente principal y por ser la forma agregable que un reporte operativo necesita. El estado por vehículo sí se expresa visualmente en el OSD mediante el color del bbox, que es donde el brief lo sitúa. **El flag booleano por vehículo no se emite en el JSON.**
+
+El criterio general ante discrepancias entre ambas fuentes: se toma del brief lo que es más específico (valores, colores) y del PDF lo que define el contrato del entregable (formato de los artefactos).
 
 ---
 
@@ -150,6 +154,8 @@ Distancia euclidiana en el plano de rasante entre los **puntos de contacto con e
 **Validación.** Con CAEX = 7.4 m, la altura de cámara estimada en video_01 resulta 11.95 m ± 0.30 m, valor físicamente plausible para un poste de faena. La convención produce geometría coherente; no se valida su exactitud, que no es verificable sobre material sintético (SUP-11).
 
 **Advertencia de propagación.** `src/geometry/calibration.py` usa exclusivamente `caex_height_m` como referencia; `dozer_height_m` solo interviene en el clasificador. Un dozer tomado por CAEX introduce un sesgo sistemático de factor 7.4/4.5 en la escala de esa toma. Ver SUP-29.
+
+**Uso secundario.** El ancho nominal de 9.0 m se emplea como umbral físico para detectar fragmentación de tracks (SUP-31): dos equipos distintos no pueden estar a menos de esa distancia.
 
 ---
 
@@ -353,6 +359,10 @@ Se prefiere un detector con **umbral de confianza bajo** acompañado de filtrado
 
 **Justificación.** Derivado de SUP-11: las geometrías imposibles del material generativo penalizan desproporcionadamente a modelos rígidos entrenados sobre maquinaria real. El tracker asume la responsabilidad de rechazar falsos positivos mediante consistencia temporal, criterio más robusto en este material que la confianza puntual del detector.
 
+**Contrato del detector.** `VehicleDetector` (`src/detection/base.py`) declara `name`, `load`, `detect`, `warmup`, `set_tracking` y `reset_tracker`. Los dos últimos se incorporaron tras una **verificación de tipos con mypy** que reveló que el pipeline los invocaba sin estar declarados en la clase base: un detector nuevo que implementara la interfaz completa habría fallado en runtime. Se definen como métodos concretos con implementación vacía, no abstractos, de modo que un detector sin estado temporal satisfaga el contrato sin escribir código innecesario.
+
+**Coste asumido del umbral bajo.** El rechazo delegado al tracker funciona frente a falsos positivos aislados, pero no corrige la fragmentación de identidad cuantificada en SUP-31: un vehículo real que desaparece unos frames y reaparece recibe un ID nuevo.
+
 ---
 
 ### SUP-19 — Reinicialización de estado en cortes de toma
@@ -364,7 +374,7 @@ Los IDs de tracking y los filtros temporales **deberían reinicializarse en cada
 
 > **Estado de implementación.** `src/pipeline.py` llama `detector.reset_tracker()` **una sola vez por video**, antes de iniciar el bucle de frames. No hay reinicialización en los cortes. En consecuencia, el tracking y la mediana móvil de altura atraviesan las transiciones de escena. Es consecuencia directa de que SUP-09 no esté implementado en el pipeline, y comparte con él la misma tarea pendiente.
 
-**Efecto observable.** Contribuye a la inflación del conteo de equipos por reaparición de IDs, registrada en el trabajo pendiente del README.
+**Efecto observable.** Contribuye a la inflación del conteo de equipos por reaparición de IDs, cuantificada en SUP-31.
 
 ---
 
@@ -380,13 +390,26 @@ El suavizado temporal sobre `H(t)` opera como **prior de rigidez**: le impone a 
 ---
 
 ### SUP-21 — Concordancia entre métodos como proxy de confiabilidad
-**Tipo:** Blando · **Estado:** Validado · **Módulo:** `docs/reporte_benchmark.md`
+**Tipo:** Blando · **Estado:** Validado, con alcance acotado · **Módulo:** `docs/reporte_benchmark.md`
 
 Ante la ausencia de ground truth (SUP-11), el **grado de acuerdo entre los dos métodos implementados** se adopta como proxy de confiabilidad de la estimación.
 
 **Justificación.** Se dispone de dos estimadores independientes. Su convergencia o divergencia es información legítima y no requiere etiquetas. Esto transforma el requisito del Módulo 1 de una comparación cosmética en un **mecanismo de validación cruzada** que sustituye parcialmente al ground truth ausente.
 
-**Medición.** Tres de los cuatro videos convergen en altura mediana de pretil bajo el 6% de diferencia entre métodos. La divergencia del cuarto es explicable: es el único donde ambos métodos usaron niveles de calibración distintos.
+**Medición sobre la ejecución de referencia.**
+
+| Video | M1 (m) | M2 (m) | Diferencia |
+|---|---|---|---|
+| 02 | 2.69 | 2.54 | 5.6% |
+| 03 | 1.86 | 1.69 | 9.1% |
+| 01 | 2.75 | 3.14 | 14.2% |
+| 04 | 2.14 | 2.55 | 19.2% |
+
+**Dos de los cuatro videos concuerdan bajo el 10%; ninguno baja del 5%.** La convergencia es más débil de lo deseable para sostener este supuesto como sustituto del ground truth.
+
+**Las divergencias no son aleatorias.** Video_04 es el único donde ambos métodos usaron **niveles distintos de la cascada de calibración**, de modo que no comparan el mismo objeto. Video_01 está afectado por el modo de fallo de SUP-01, donde el criterio de máxima energía engancha estructuras distintas: ambos métodos miden, pero no necesariamente la misma estructura.
+
+**Alcance real del supuesto.** La concordancia mide el acuerdo del **sistema completo**, no solo del detector. Cuando la cascada de calibración o el extractor de cresta divergen, la concordancia lo refleja. Eso lo hace un indicador útil de salud del pipeline, pero un sustituto débil del ground truth ausente.
 
 > **Nota.** La concordancia se calcula en el reporte de benchmark a partir de los `metadata.json` de ambos métodos. No existe un `comparison.json` generado automáticamente por `--method all`.
 
@@ -412,20 +435,22 @@ Se asume ejecución con `--gpus all` sobre GPU NVIDIA/CUDA. El sistema **detecta
 
 **Justificación.** El comando de ejemplo del PDF no incluye `--gpus`; el del brief HTML sí. El fallback cubre ambos escenarios. Un contenedor que entrega artefactos lentamente en CPU vale sustancialmente más en la evaluación que uno que aborta por ausencia de dispositivo.
 
-**Validación.** Ejecución completa sobre runner Linux x86_64 sin GPU (GitHub Actions): los cuatro videos procesados, los cuatro artefactos escritos por video, a 4.2–5.5 FPS. La degradación opera sin intervención.
+**Validación.** Ejecución completa sobre runner Linux x86_64 sin GPU (GitHub Actions): los cuatro videos procesados con ambos métodos, los cuatro artefactos escritos por combinación. La degradación opera sin intervención.
+
+**Inferencia en FP16.** La media precisión se habilita automáticamente cuando el dispositivo resuelto es `cuda`, y se puede desactivar por configuración (`runtime.half_precision`). **No se activa en CPU ni en MPS**: en CPU muchas operaciones carecen de kernel en media precisión y el resultado sería más lento, y el soporte en MPS es parcial. Como consecuencia, **su efecto no pudo medirse** en este entorno: el desarrollo se hizo en Apple Silicon y la validación en runners sin GPU. Se declara como implementado, no como mejora verificada.
 
 ---
 
 ### SUP-24 — Ausencia de red en runtime
-**Tipo:** Duro · **Estado:** Implementado; validado en build, pendiente la prueba `--network none` · **Módulo:** `Dockerfile`, `tools/prepare_weights.py`
+**Tipo:** Duro · **Estado:** Validado, incluida la prueba sin red · **Módulo:** `Dockerfile`, `tools/prepare_weights.py`
 
-**No hay conectividad de red durante la ejecución.** Todos los pesos se descargan durante `docker build` y quedan horneados en la imagen bajo `/app/weights`. Las variables `TORCH_HOME`, `YOLO_CONFIG_DIR` y `HF_HOME` se fijan dentro del contenedor para impedir que cualquier librería intente resolución remota.
+**No hay conectividad de red durante la ejecución.** Todos los pesos se descargan durante `docker build` y quedan horneados en la imagen bajo `/app/weights`. Las variables `TORCH_HOME`, `YOLO_CONFIG_DIR` y `HF_HOME` se fijan dentro del contenedor para impedir que cualquier librería intente resolución remota, y `YOLO_AUTOINSTALL=false` bloquea la instalación de paquetes en runtime.
 
 **Justificación.** Requisito "Plug & Play" explícito del enunciado.
 
 **Hallazgo de despliegue.** YOLO-World descarga el encoder de texto CLIP la primera vez que se invoca `set_classes()`, es decir **después** de cargar los pesos del detector. Copiar únicamente el `.pt` no basta: el contenedor fallaría al arrancar en un entorno sin red. Se resuelve forzando la inicialización del vocabulario durante el build. El encoder pesa 354 MB, catorce veces más que el detector que lo usa.
 
-**Criterio de aceptación pendiente.** El contenedor debe completar un procesamiento íntegro bajo `docker run --network none`. Esta prueba forma parte del checklist de entrega.
+**Criterio de aceptación cumplido.** El contenedor completa el procesamiento íntegro de los cuatro videos con ambos métodos bajo `docker run --network none`, verificado en el workflow de CI (`.github/workflows/run.yml`). Los ocho `metadata.json` y los treinta y dos artefactos se generaron sin conectividad. **Los pesos horneados en la imagen bastan: no hay resolución remota en runtime.**
 
 ---
 
@@ -434,7 +459,9 @@ Se asume ejecución con `--gpus all` sobre GPU NVIDIA/CUDA. El sistema **detecta
 
 Archivos ilegibles, corruptos o de formato no soportado se **registran en log y se omiten sin abortar el procesamiento del lote**. `process_video` lanza `ValueError` ante un archivo ilegible y `run_pipeline` lo captura, contabiliza el fallo y continúa con el siguiente archivo.
 
-**Justificación.** La evaluación es automatizada sobre un set ciego. Una excepción no capturada en el primer archivo pierde todos los videos restantes y con ello la totalidad de la evaluación.
+**Tolerancia a nivel de frame.** El bucle de procesamiento captura también las excepciones de un frame individual: se registra en log, se escribe el frame original sin OSD para preservar la duración del video de salida, y la altura de ese frame queda como dato faltante, que los gráficos ya representan como hueco explícito. **Un frame que falla no arrastra al video completo.**
+
+**Justificación.** La evaluación es automatizada sobre un set ciego. Una excepción no capturada en el primer archivo pierde todos los videos restantes; una excepción a mitad de un video pierde ese video entero pese a haber procesado la mayoría de sus frames.
 
 ---
 
@@ -445,7 +472,7 @@ Los cuatro artefactos requeridos se generan **para todo video procesado**, inclu
 
 **Justificación.** El enunciado acepta explícitamente resultado parcial o nulo. No acepta ausencia de entregable. Un resultado nulo bien documentado es un resultado; un directorio vacío es un fallo de ingeniería.
 
-**Validación.** Los cuatro videos produjeron sus cuatro artefactos en la ejecución de CI, incluido video_04, cuya calibración degradó a nivel 2.
+**Validación.** Los cuatro videos produjeron sus cuatro artefactos con ambos métodos en la ejecución de CI, incluido video_04, cuya calibración degradó a nivel 2, y el caso de video_02 con método 2, donde la matriz de distancias no encontró pares concurrentes y se anotó explícitamente en lugar de omitir el panel.
 
 ---
 
@@ -463,14 +490,9 @@ output/
 
 **Justificación.** El enunciado pide "un argumento todo en 1". La separación por subdirectorio evita sobrescritura de artefactos homónimos y habilita el análisis de concordancia de SUP-21.
 
-> **Nota.** El resumen comparativo `comparison.json` a nivel de video no está implementado. La comparación se realiza manualmente sobre ambos `metadata.json` en el reporte de benchmark.
+**Interfaz CLI.** Los tres argumentos son `--input`, `--output` y `--method`, exactamente como los nombra el enunciado. El entrypoint acepta la invocación con `python main.py` delante, la forma idiomática de Docker, y la ejecución sin argumentos, que toma las rutas por defecto del `CMD` del Dockerfile.
 
-**Corrección detectada por verificación de tipos.** `set_tracking` y
-`reset_tracker` eran invocados por el pipeline sin estar declarados en
-`VehicleDetector`. Un detector nuevo que implementara la interfaz completa
-habría fallado en runtime. Se incorporaron a la clase base como métodos
-concretos con implementación vacía, no abstractos: un detector sin estado
-temporal satisface el contrato sin escribir código innecesario.
+> **Nota.** El resumen comparativo `comparison.json` a nivel de video no está implementado. La comparación se realiza sobre ambos `metadata.json` en el reporte de benchmark.
 
 ---
 
@@ -492,7 +514,9 @@ COCO no contiene clase para maquinaria de oruga: CAEX y bulldozer se detectan am
 
 1. **Relación de aspecto.** Insuficiente: un CAEX de perfil completo alcanza ratio 1.98, indistinguible del 1.94 de un dozer.
 2. **Consistencia física de la altura implicada.** Insuficiente por **ambigüedad geométrica genuina** de la vista monocular: un vehículo más bajo y más cercano produce exactamente la misma señal que uno más alto y más lejano. Sobre video_03 f90, con horizonte medido en y = 395.8, ambos vehículos convergen a h_cámara ≈ 5.4 m bajo hipótesis CAEX, sin separación explotable. **No es un defecto de implementación.**
-3. **Prompts de texto explícitos (método 2).** Sobre video_03 f90, con un CAEX y un bulldozer en cuadro y `"bulldozer"` / `"crawler tractor with blade"` en el vocabulario, ambos se etiquetaron `caex`. El vocabulario **sí produce la clase `dozer`**, pero de forma esporádica: en la corrida completa aparece con 1 a 2 frames de presencia en video_03 y video_04, frente a decenas de frames del mismo objeto etiquetado `caex`. **La clase existe en la salida pero no es estable sobre un mismo track**, de modo que no constituye una clasificación utilizable.
+3. **Prompts de texto explícitos (método 2).** Sobre video_03 f90, con un CAEX y un bulldozer en cuadro y `"bulldozer"` / `"crawler tractor with blade"` en el vocabulario, ambos se etiquetaron `caex`. El vocabulario **sí produce la clase `dozer`**, pero de forma esporádica: en la ejecución de referencia aparece con 1 a 2 frames de presencia en video_03 y video_04, frente a decenas de frames del mismo objeto etiquetado `caex`. **La clase existe en la salida pero no es estable sobre un mismo track**, de modo que no constituye una clasificación utilizable.
+
+**Inestabilidad de clase dentro de un track.** El fenómeno se observa también en el método 1: en video_02 el panel de permanencia registra `caex #26` y `other_heavy #26` como entradas separadas, es decir el mismo ID de seguimiento con dos clases distintas en frames distintos. La clasificación no solo es incorrecta: es inconsistente sobre el mismo objeto.
 
 **Decisión.** Se conserva la clasificación única `caex` en la línea base. **Ningún enfoque zero-shot resuelve la clasificación en este material**; requiere fine-tune sobre datos del dominio (SUP-12), que no se realizó.
 
@@ -547,9 +571,21 @@ La distancia métrica entre dos vehículos se calcula convirtiendo la distancia 
 
 **Limitación de cobertura.** La matriz solo compara tracks con ID estable, de modo que un video con muchas alertas puede no producir ningún par trazable. En video_02 el método 2 registra 71 alertas de proximidad y la matriz queda vacía: las alertas se calculan sobre todas las detecciones del frame, mientras que la matriz exige identidad persistente. Ambas cifras son correctas y miden cosas distintas. La cobertura de la matriz depende por tanto de la calidad del tracking, no solo de la geometría.
 
-**Uso como detector de fragmentación de tracks.** Un valor por debajo del ancho nominal del equipo (9 m para CAEX, SUP-07) es físicamente imposible entre dos vehículos distintos y delata que un mismo objeto recibió dos IDs. El método 1 lo produce en tres de los cuatro videos: 0.08 m en video_02 entre tracks de clases distintas, 1.49 m en video_01, y tres pares del mismo track bajo 3 m en video_04. La matriz, diseñada para reportar proximidad, resulta ser también una medición del problema de identidad descrito en el trabajo pendiente.
+**Uso como detector de fragmentación de tracks.** Un valor por debajo del ancho nominal del equipo (9 m para CAEX, SUP-07) es físicamente imposible entre dos vehículos distintos y delata que un mismo objeto recibió dos IDs. El método 1 lo produce en tres de los cuatro videos:
 
-**Limitación.** La aproximación se degrada cuando la separación en profundidad entre ambos vehículos es grande, porque la escala varía de forma no lineal con `y`.
+| Video | Distancia mínima | Par |
+|---|---|---|
+| 02 | **0.08 m** | `caex #26` / `other_heavy #27` |
+| 01 | 1.49 m | `caex #47` / `caex #97` |
+| 04 | 2.45 m | `caex #6` / `caex #7`, más otros dos pares del mismo track bajo 3 m |
+
+El caso de video_02 es el más informativo: 8 cm de separación entre tracks de clases distintas es el mismo objeto detectado dos veces. En video_04 el track `#6` aparece a menos de 3 m de otros tres tracks simultáneamente, configuración imposible para un equipo real.
+
+La matriz, diseñada para reportar proximidad, resulta ser también una **medición del problema de identidad** que SUP-19 no resuelve. El método 2 no presenta el fenómeno en ninguno de los tres videos donde produce pares.
+
+**Consecuencia sobre el conteo de alertas.** Las cifras de `proximity_alerts` del método 1 están infladas: un vehículo duplicado genera alerta crítica permanente contra sí mismo. El conteo absoluto no debe usarse como métrica de calidad de detección.
+
+**Limitación.** La aproximación de escala se degrada cuando la separación en profundidad entre ambos vehículos es grande, porque la escala varía de forma no lineal con `y`.
 
 **Degradación.** Si la calibración no es métrica, la matriz de distancias mínimas se reporta en píxeles y lo declara en el título del gráfico.
 
@@ -562,6 +598,7 @@ La tabla separa las tres cosas para que ninguna afirmación de este documento pu
 | ID | Medido | Adoptado | Implementado en el pipeline |
 |---|---|---|---|
 | SUP-01 | Sí (limitación y alternativa) | Criterio de máxima energía | Sí; la alternativa Viterbi **no** |
+| SUP-04 | — | Umbrales del brief, formato del PDF | Sí |
 | SUP-07 | Sí (recon 07) | Sí | Sí |
 | SUP-08 | Sí (recon 01) | Sí | n/a |
 | **SUP-09** | **Sí (12/16 cortes)** | **Sí** | **No — solo en `tools/recon/`** |
@@ -570,21 +607,25 @@ La tabla separa las tres cosas para que ninguna afirmación de este documento pu
 | SUP-15 | Sí (recon 07 + producción) | Sí | Sí, niveles 1 y 2 observados |
 | **SUP-16** | n/a | Sí | **No** |
 | SUP-17 | Sí (recon 07 + producción) | Sí | Parcial: dispersión sí, banda de error no |
+| SUP-18 | — | Sí | Sí, contrato corregido tras mypy |
 | **SUP-19** | n/a | Sí | **No — reset una vez por video** |
 | SUP-20 | n/a | Sí | Sí |
-| SUP-21 | Sí | Sí | Manual, sin `comparison.json` |
+| SUP-21 | Sí (2/4 bajo 10%) | Sí, con alcance acotado | Manual, sin `comparison.json` |
 | **SUP-22** | Sí (clasificación lumínica) | Sí | **No** |
-| SUP-23 | Sí (CI sin GPU) | Sí | Sí |
-| SUP-24 | Build sí; `--network none` no | Sí | Sí |
-| SUP-26 | Sí (4 videos) | Sí | Sí |
+| SUP-23 | Sí (CI sin GPU) | Sí | Sí; FP16 implementado, **no medido** |
+| SUP-24 | Sí (`--network none` en CI) | Sí | Sí |
+| SUP-25 | — | Sí | Sí, a nivel de archivo y de frame |
+| SUP-26 | Sí (8 combinaciones) | Sí | Sí |
 | SUP-27 | — | Sí | Sí, sin `comparison.json` |
 | SUP-29 | Sí (4 enfoques descartados) | Clase única | Sí |
 | **SUP-30** | Sí (CLAHE 4.0, +45%) | Sí | **No** |
-| SUP-31 | n/a | Sí | Sí |
+| SUP-31 | Sí (fragmentación en 3/4 videos) | Sí | Sí |
 
 **Cadena de dependencia pendiente.** SUP-09 (segmentación por toma en el pipeline) es prerrequisito de SUP-19 (reinicialización de tracking) y de SUP-22 (preprocesado por toma), que a su vez es prerrequisito de aplicar el CLAHE de SUP-30. Es una sola tarea que desbloquea tres supuestos, y es la de mayor retorno del trabajo pendiente.
 
-**Advertencia de reproducibilidad.** Las cifras de recon 07 citadas en SUP-07, SUP-14, SUP-15 y SUP-17 están documentadas aquí, pero los artefactos correspondientes en `data/recon/` fueron sobrescritos por ejecuciones posteriores: `scale_2veh.json` quedó sin frames y `scale.json` conserva únicamente un frame marcado `valid: false`, correspondiente al método de punto de fuga descartado en SUP-14. **Re-ejecutar esos scripts no reproduce las cifras citadas.** Regenerar los artefactos es tarea pendiente.
+**Determinismo verificado.** Dos ejecuciones independientes del mismo commit en CI produjeron valores idénticos de altura, percentiles, dispersión, alertas, cobertura, distancia mínima y horizonte en las ocho combinaciones video-método. Solo variaron las métricas de latencia (`avg_fps`, `avg_ms_per_frame`), por carga de CPU compartida en los runners. **Los resultados analíticos de este sistema son reproducibles; las cifras de rendimiento no lo son en este entorno.**
+
+**Advertencia de reproducibilidad de recon 07.** Las cifras citadas en SUP-07, SUP-14, SUP-15 y SUP-17 están documentadas aquí, pero los artefactos correspondientes en `data/recon/` fueron sobrescritos por ejecuciones posteriores: `scale_2veh.json` quedó sin frames y `scale.json` conserva únicamente un frame marcado `valid: false`, correspondiente al método de punto de fuga descartado en SUP-14. **Re-ejecutar esos scripts no reproduce las cifras citadas.** Regenerar los artefactos es tarea pendiente.
 
 ---
 
@@ -598,11 +639,13 @@ Se documentan explícitamente para que no sean interpretados como omisiones. Son
 
 **No se opera en tiempo real.** El diseño es batch offline. Se mide y reporta FPS, y el reporte de benchmark discute la brecha hacia un despliegue real de seguridad, donde la latencia sí sería un requisito duro.
 
-**No se implementa cuantización INT8 ni TensorRT.** Con el volumen de frames involucrado (SUP-08) el beneficio práctico es nulo en modo batch. Se declara la técnica y el argumento de por qué no aporta en este escenario específico, en lugar de aplicarla sin discutir su pertinencia.
+**No se implementa cuantización INT8 ni TensorRT.** Con el volumen de frames involucrado (SUP-08) el beneficio práctico es nulo en modo batch. FP16 sí está implementado bajo CUDA, pero su efecto no pudo medirse en este entorno (SUP-23). Se declara la técnica y el argumento de por qué no aporta en este escenario específico, en lugar de aplicarla sin discutir su pertinencia.
 
 **No se resuelve la clasificación CAEX/dozer.** Cuatro enfoques evaluados y descartados (SUP-29). Requiere fine-tune con datos etiquetados del dominio, que no se realizó por restricción de tiempo.
 
 **No se segmenta por toma dentro del pipeline.** La detección de tomas está construida y medida, pero su integración al pipeline de inferencia quedó fuera de alcance. Las consecuencias están declaradas en SUP-09, SUP-19, SUP-22 y §7.
+
+**No se implementa reidentificación por apariencia.** Es la vía correcta para resolver la fragmentación de identidad cuantificada en SUP-31. ByteTrack asocia por posición y solapamiento, sin memoria visual del objeto.
 
 ---
 
@@ -612,10 +655,10 @@ Se documentan explícitamente para que no sean interpretados como omisiones. Son
 |---|---|---|
 | Robustez MLOps & Docker | 20 % | SUP-23, 24, 25, 26, 27 |
 | Rigor Matemático & Analítica | 20 % | SUP-02, 03, 05, 07, 13, 14, 15, 16, 17, 31 |
-| Performance Visual & Segmentación | 25 % | SUP-01, 09, 18, 19, 20, 22, 30 |
+| Performance Visual & Segmentación | 25 % | SUP-01, 09, 18, 19, 20, 22, 29, 30, 31 |
 | Arquitectura & Benchmark | 35 % | Este registro en su totalidad, con énfasis en SUP-10, 11, 20, 21, 29, §7 y §8 |
 
-El criterio de mayor ponderación evalúa, en palabras del enunciado, *"profundidad técnica y honestidad analítica en el reporte comparativo"*. Lo que materializa esa honestidad en este documento: SUP-10 registra un supuesto duro que la medición refutó; SUP-14 registra un método que falló y el alternativo que lo reemplazó; SUP-29 registra cuatro enfoques descartados; §7 distingue lo implementado de lo solamente adoptado y declara qué artefactos no reproducen sus propias cifras; y §8 explicita qué se decidió no hacer.
+El criterio de mayor ponderación evalúa, en palabras del enunciado, *"profundidad técnica y honestidad analítica en el reporte comparativo"*. Lo que materializa esa honestidad en este documento: SUP-10 registra un supuesto duro que la medición refutó; SUP-14 registra un método que falló y el alternativo que lo reemplazó; SUP-21 revisa a la baja su propia evidencia al contrastarla con la ejecución de referencia; SUP-29 registra cuatro enfoques descartados; SUP-31 usa un artefacto de salida para medir un defecto del propio sistema; §7 distingue lo implementado de lo solamente adoptado y declara qué artefactos no reproducen sus propias cifras; y §8 explicita qué se decidió no hacer.
 
 ---
 
@@ -624,7 +667,6 @@ El criterio de mayor ponderación evalúa, en palabras del enunciado, *"profundi
 | Versión | Cambio |
 |---|---|
 | 1.0 | Versión inicial. SUP-01 a SUP-27 establecidos. Cinco supuestos duros pendientes de validación empírica. |
-| 1.1 | Validación empírica de SUP-07, 08, 09, 14, 15, 17, 23, 26, 28. **SUP-10 refutado** y reformulado. Incorporados SUP-29, SUP-30 y SUP-31. SUP-01 ampliado con la limitación medida y la alternativa evaluada. §7 reescrita como tabla que separa medido / adoptado / implementado, tras auditar el código: **SUP-09, 16, 19, 22 y 30 quedan declarados como no implementados**. Añadida advertencia de reproducibilidad de los artefactos de recon 07. |
+| 1.1 | Validación empírica de SUP-07, 08, 09, 14, 15, 17, 23, 24, 26, 28. **SUP-10 refutado** y reformulado. Incorporados SUP-29, SUP-30 y SUP-31. SUP-01 ampliado con la limitación medida y la alternativa evaluada. SUP-21 revisado a la baja con las cifras de la ejecución de referencia. SUP-24 validado con `--network none` en CI. §7 reescrita como tabla que separa medido / adoptado / implementado, tras auditar el código: **SUP-09, 16, 19, 22 y 30 quedan declarados como no implementados**. Añadidas la verificación de determinismo y la advertencia de reproducibilidad de los artefactos de recon 07. |
 
 > **Al modificar un supuesto:** actualizar su campo *Estado*, registrar el resultado numérico obtenido, e incrementar la versión del documento. El campo `assumptions_version` de `metadata.json` debe reflejar la versión vigente al momento de la ejecución.
-

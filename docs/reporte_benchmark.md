@@ -6,9 +6,9 @@ monitoreo de proximidad.
 
 **Procedencia de las cifras.** Salvo donde se indique lo contrario, todos los
 valores provienen de una única ejecución de `--method all` sobre runner Linux
-x86_64 **sin GPU** (GitHub Actions), a partir del estado versionado del
-repositorio. Los ocho `metadata.json` que las respaldan se regeneran ejecutando
-el contenedor sobre `data/videos/`.
+x86_64 **sin GPU y sin conectividad de red** (GitHub Actions, `--network none`),
+a partir del estado versionado del repositorio. Los ocho `metadata.json` que las
+respaldan se regeneran ejecutando el contenedor sobre `data/videos/`.
 
 ---
 
@@ -33,6 +33,7 @@ comparación aísla el detector.
 | Umbral de confianza | 0.25 | 0.05 | Los rangos de confianza no son comparables entre paradigmas. El valor de cada método se calibró para maximizar recall sin admitir el falso positivo `airplane` que COCO produce en estas escenas con conf 0.17 |
 | Tracker | ByteTrack | ByteTrack | Idéntico, para aislar el efecto del detector |
 | Resolución de inferencia | Nativa | Nativa | 1920×1080 y 1280×720 según el video (SUP-28) |
+| Precisión | FP32 en CPU, FP16 bajo CUDA | FP32 en CPU, FP16 bajo CUDA | Media precisión solo donde tiene kernel eficiente (SUP-23) |
 
 El umbral bajo en ambos casos es deliberado (SUP-18): el material generativo
 produce geometrías irregulares que penalizan a detectores estrictos, y el
@@ -115,8 +116,9 @@ runners de CI arrojaron FPS distintos (video_01/M1: 6.28 y 4.15; video_01/M2:
 4.34 y 2.55), por carga variable de CPU compartida. **Los valores absolutos de
 latencia no son reproducibles en este entorno; la razón entre métodos sí**
 (1.45 y 1.63). Todas las demás métricas —altura, percentiles, dispersión,
-alertas, cobertura, distancia mínima, horizonte— son idénticas entre ambas
-ejecuciones: el pipeline es determinista salvo en la medición de tiempo.
+alertas, cobertura, distancia mínima, horizonte— son **idénticas** entre ambas
+ejecuciones en las ocho combinaciones video-método: el pipeline es determinista
+salvo en la medición de tiempo.
 
 ---
 
@@ -128,6 +130,13 @@ ejecuciones: el pipeline es determinista salvo en la medición de tiempo.
 | 02 | 15 | 71 | 2.69 | 2.54 | 5.9% | 6.3% |
 | 03 | 13 | 34 | 1.86 | 1.69 | 11.8% | 15.4% |
 | 04 | 4 | 67 | 2.14 | 2.55 | nivel 2 | 6.9% |
+
+> **Nota de lectura sobre las alertas.** `proximity_alerts` cuenta **pares de
+> equipos en riesgo por frame**, acumulado sobre la secuencia. El mapa de
+> distribución espacial, en cambio, colorea **detecciones-frame** por su nivel de
+> riesgo individual. Las dos cifras difieren por construcción y no son
+> comparables entre sí: en video_03 con método 1, el mapa muestra 6 puntos
+> críticos y el metadata reporta 13 alertas. Ambas son correctas.
 
 **Video_04 es el caso decisivo.** El método 1 no reunió referencia vehicular
 suficiente y degradó al nivel 2 de la cascada (`assumed_camera_height`,
@@ -184,9 +193,17 @@ Distancia mínima registrada entre pares de equipos concurrentes (SUP-31).
 imposibles.** Un CAEX mide del orden de 9 m de ancho (SUP-07); dos de ellos con
 puntos de contacto a 0.08 m, 1.49 m o 2.45 m ocuparían el mismo espacio.
 
-El caso de video_02 es el más informativo: 8 cm de separación entre un track
-etiquetado `caex` y otro etiquetado `other_heavy`. **Es el mismo objeto detectado
-dos veces**, con dos IDs y dos clases simultáneas.
+Dos casos son especialmente informativos:
+
+- **Video_02.** 8 cm de separación entre un track etiquetado `caex` y otro
+  etiquetado `other_heavy`. **Es el mismo objeto detectado dos veces**, con dos
+  IDs y dos clases simultáneas. El panel de permanencia lo confirma: registra
+  `caex #26` y `other_heavy #26` como entradas separadas, es decir el mismo ID de
+  seguimiento con clases distintas en frames distintos.
+- **Video_04.** El track `caex #6` aparece a menos de 3 m de otros **tres** tracks
+  a la vez: 2.6 m de `#1`, 2.7 m de `#3` y 2.5 m de `#7`. Un equipo real no puede
+  estar rodeado así; la configuración solo se explica si varios de esos IDs
+  corresponden al mismo vehículo.
 
 Esto convierte una limitación hasta ahora declarada cualitativamente —la
 detección intermitente genera IDs nuevos al reaparecer un vehículo— en una
@@ -299,8 +316,15 @@ adoptada. El método, las métricas y las limitaciones están en
 **Clasificación CAEX/dozer.** Se esperaba que el método 2 la resolviera, dado que
 acepta prompts de texto y se le proporcionaron `"bulldozer"` y `"crawler tractor
 with blade"` como clases explícitas. **No lo hizo**: sobre video_03 f90, con un
-CAEX y un bulldozer en cuadro, ambos se etiquetaron `caex`. El vocabulario está
-disponible pero el modelo no discrimina estas dos clases en este material.
+CAEX y un bulldozer en cuadro, ambos se etiquetaron `caex`.
+
+El matiz exacto importa. El vocabulario **sí produce la clase `dozer`**, pero de
+forma esporádica: en la ejecución de referencia aparece con 1 a 2 frames de
+presencia en video_03 y video_04, frente a decenas de frames del mismo objeto
+etiquetado `caex`. **La clase existe en la salida pero no es estable sobre un
+mismo track**, de modo que no constituye una clasificación utilizable. El método 1
+exhibe el mismo tipo de inestabilidad: en video_02, el ID de seguimiento `#26`
+aparece etiquetado `caex` en unos frames y `other_heavy` en otros.
 
 Combinado con los dos discriminantes geométricos ya descartados —relación de
 aspecto (1.98 contra 1.94) y consistencia física de la altura implicada, esta
@@ -316,7 +340,8 @@ reconstruye (SUP-30).
 
 **Estabilidad de identidad de los tracks.** Ambos métodos fragmentan IDs, el
 método 1 de forma medible y severa (§3.3). Ninguno de los dos incorpora
-reidentificación por apariencia.
+reidentificación por apariencia, que es la vía correcta para resolverlo:
+ByteTrack asocia por posición y solapamiento, sin memoria visual del objeto.
 
 ---
 
@@ -330,6 +355,9 @@ un entorno sin red, incumpliendo el requisito Plug & Play.
 Se resolvió mediante `tools/prepare_weights.py`, que fuerza la inicialización del
 vocabulario durante el `docker build`. El encoder queda cacheado bajo
 `/app/weights`, ruta que Ultralytics resuelve en runtime sin conectividad.
+
+**Verificado en CI:** el contenedor completa el procesamiento de los cuatro
+videos con ambos métodos bajo `docker run --network none`.
 
 Este costo es propio del paradigma open-vocabulary: **el encoder de texto pesa 354
 MB, catorce veces más que el detector que lo usa**. Es un factor decisivo en
@@ -349,7 +377,8 @@ degradan.
 **Para operación continua incluyendo turno de noche: método 2.** El triple de
 recall nocturno es determinante en un sistema de seguridad: un vehículo no
 detectado es una alerta de proximidad que no se emite. Además es el único que
-calibra en nivel 1 sobre los cuatro videos, y estima mejor el horizonte.
+calibra en nivel 1 sobre los cuatro videos, estima mejor el horizonte, y no
+exhibe la fragmentación severa de tracks del método 1.
 
 **Para producción: ninguno de los dos tal cual.** Tres razones, en orden de
 gravedad:
@@ -375,14 +404,21 @@ gravedad:
   la fragmentación de IDs cuantificada en §3.3. Se reporta por transparencia, no
   como criterio de selección.
 - **La latencia se midió en CPU**, no en el hardware objetivo con CUDA. Los
-  valores absolutos no son transferibles; la comparación relativa sí, al haberse
-  medido en la misma ejecución.
+  valores absolutos no son transferibles ni reproducibles entre ejecuciones; la
+  comparación relativa sí, al haberse medido en la misma ejecución.
 - **Las cifras de recall por condición lumínica (§3.1) provienen de una medición
   dirigida separada** y no se regeneran ejecutando el contenedor.
-- **Optimización de inferencia no evaluada.** Con 1.022 frames en modo batch,
-  cuantización INT8 o TensorRT no aportan beneficio medible. En un despliegue real
-  de tiempo real sí serían determinantes, y la brecha entre 5–8 FPS en CPU y el
-  requisito de tiempo real es precisamente donde esas técnicas se justificarían.
+- **FP16 está implementado pero no medido.** La inferencia en media precisión se
+  activa automáticamente cuando el dispositivo resuelto es CUDA, y se puede
+  desactivar por configuración. **No fue posible medir su efecto**: el desarrollo
+  se hizo en Apple Silicon y las ejecuciones de validación en runners de CI sin
+  GPU. Se declara como implementado, no como mejora verificada. En este material
+  la ganancia esperada sería además acotada, porque la extracción de cresta —que
+  corre en CPU con OpenCV— compite con la inferencia por el costo por frame.
+- **INT8 y TensorRT no se implementaron.** Con 1.022 frames en modo batch el
+  beneficio práctico es nulo. En un despliegue real de tiempo real sí serían
+  determinantes, y la brecha entre 5–8 FPS en CPU y el requisito de tiempo real
+  es precisamente donde esas técnicas se justificarían.
 - **El segundo eje del benchmark (§4) no está integrado al pipeline.** Sus cifras
   provienen de `tools/recon/08_crest_viterbi.py`, no de la ejecución del
   contenedor.
