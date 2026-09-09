@@ -50,3 +50,13 @@ class VehicleDetector(ABC):
         primera llamada de las mediciones de latencia del benchmark."""
         dummy = np.zeros((*shape, 3), dtype=np.uint8)
         self.detect(dummy, -1)
+
+    def set_tracking(self, enabled: bool) -> None:
+        """Activa o desactiva el seguimiento entre frames.
+        ...
+        """
+
+    def reset_tracker(self) -> None:
+        """Reinicia el estado del seguimiento y la numeracion de IDs.
+        ...
+        """

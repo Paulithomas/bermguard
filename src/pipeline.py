@@ -115,7 +115,7 @@ def process_video(video_path: Path, output_dir: Path, method: str,
 
     writer = cv2.VideoWriter(
         str(output_dir / f"{video_path.stem}_osd.mp4"),
-        cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+        cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)) # type: ignore[attr-defined]
 
     heights: list[float | None] = []
     positions: list[dict[str, Any]] = []

@@ -52,7 +52,7 @@ def texture_map(gray: np.ndarray, window: int = 15) -> np.ndarray:
     mean = cv2.blur(f, (window, window))
     sq = cv2.blur(f * f, (window, window))
     var = np.sqrt(np.maximum(sq - mean * mean, 0.0))
-    return cv2.normalize(var, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    return cv2.normalize(var, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8) # type: ignore[call-overload]
 
 
 def horizontal_response(texture: np.ndarray, kernel_width: int) -> np.ndarray:
