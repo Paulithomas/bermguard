@@ -18,8 +18,9 @@ docker run --rm --gpus all \
 ```
 
 El entrypoint acepta tanto la invocación anterior como la forma idiomática de
-Docker (`bermguard:latest --input ...`) y la ejecución sin argumentos, que usa
-las rutas por defecto `/app/test` y `/app/output`.
+Docker (`bermguard:latest --input ...`). Ejecutado sin argumentos, el `CMD` del
+Dockerfile aplica las rutas por defecto `/app/test` y `/app/output` con
+`--method 1`.
 
 **En equipos sin GPU NVIDIA, omitir `--gpus all`.** El dispositivo se resuelve en
 cascada `cuda → mps → cpu` (SUP-23). La imagen se construye con
@@ -55,6 +56,17 @@ Los cuatro artefactos se escriben siempre, incluso ante detección nula. Un
 resultado nulo bien documentado es un resultado; un directorio vacío es un fallo
 de ingeniería.
 
+### Ejecución de referencia incluida
+
+La carpeta `output/` de este entregable contiene los resultados de una
+ejecución completa con `--method all` sobre los cuatro videos de muestra,
+generada en el runner de CI descrito arriba. Se incluye para que los artefactos
+sean inspeccionables sin necesidad de construir la imagen.
+
+Es reproducible: el pipeline es determinista y una nueva ejecución del
+contenedor sobre `data/videos/` produce los mismos valores de altura,
+calibración, alertas y distancias. Solo varían las métricas de latencia
+(`avg_fps`, `avg_ms_per_frame`), que dependen de la carga de la máquina.
 ---
 
 ## Documentación
@@ -251,3 +263,8 @@ vale más que uno que aborta por ausencia de GPU.
 
 Las cifras de rendimiento publicadas (5–8 FPS) corresponden a ejecución en CPU
 sobre runner de CI. En el hardware objetivo serán sustancialmente mejores.
+
+El código pasa `mypy src/ main.py --ignore-missing-imports` sin errores. Las dos
+únicas anotaciones `type: ignore` corresponden a limitaciones de los stubs de
+OpenCV (`cv2.normalize` con `dst=None` y `cv2.VideoWriter_fourcc`), no a
+supresiones de errores reales.
